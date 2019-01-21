@@ -33,6 +33,7 @@ logger.setLevel(logging.DEBUG)
 
 
 def get_bibot_config():
+    # create or refer to the global parameter ATHENA_DB and ATHENA_OUTPUT_LOCATION
     global ATHENA_DB
     global ATHENA_OUTPUT_LOCATION
 
@@ -51,6 +52,7 @@ def execute_athena_query(query_string):
 
     athena = boto3.client('athena')
 
+    # start the query execution with the SQL input
     response = athena.start_query_execution(
         QueryString=query_string,
         QueryExecutionContext={'Database': ATHENA_DB},
@@ -61,44 +63,51 @@ def execute_athena_query(query_string):
 
     query_execution_id = response['QueryExecutionId']
 
+    # periodically check if the execution has been successful
     status = 'RUNNING'
     while (status == 'RUNNING'):
         response = athena.get_query_execution(QueryExecutionId=query_execution_id)
         status = response['QueryExecution']['Status']['State']
         if (status == 'RUNNING'):
-            #logger.debug('<<BIBot>> query status = ' + status + ': sleep 200ms') 
+            # logger.debug('<<BIBot>> query status = ' + status + ': sleep 200ms')
             time.sleep(0.200)
 
+    # after the execution is sucessful, record the query status
     duration = time.perf_counter() - start
     duration_string = 'query duration = %.0f' % (duration * 1000) + ' ms'
-    logger.debug('<<BIBot>> query status = ' + status + ', ' + duration_string) 
+    logger.debug('<<BIBot>> query status = ' + status + ', ' + duration_string)
 
+    # record the query results in json format
     response = athena.get_query_results(QueryExecutionId=query_execution_id)
-    logger.debug('<<BIBot>> query response = ' + json.dumps(response)) 
+    logger.debug('<<BIBot>> query response = ' + json.dumps(response))
 
+    # return the query results
     return response
 
 
 def get_slot_values(slot_values, intent_request):
     if slot_values is None:
-        slot_values = {key: None for key in bibot.SLOT_CONFIG}
-    
+        slot_values = {key: None for key in bibot.SLOT_CONFIG}  # remember that: import bibot_config as bibot
+
     slots = intent_request['currentIntent']['slots']
 
-    for key,config in bibot.SLOT_CONFIG.items():
-        slot_values[key] = slots.get(key)
+    for key, config in bibot.SLOT_CONFIG.items():
+        slot_values[key] = slots.get(
+            key)  # reload the slot_values's value with intent_request['currentIntent']['slots'].get(key)
         logger.debug('<<BIBot>> retrieving slot value for %s = %s', key, slot_values[key])
         if slot_values[key]:
-            if config.get('type', bibot.ORIGINAL_VALUE) == bibot.TOP_RESOLUTION:
+            if config.get('type',
+                          bibot.ORIGINAL_VALUE) == bibot.TOP_RESOLUTION:  # if config['type'] == bibot.TOP_RESOLUTION
                 # get the resolved slot name of what the user said/typed
                 if len(intent_request['currentIntent']['slotDetails'][key]['resolutions']) > 0:
                     slot_values[key] = intent_request['currentIntent']['slotDetails'][key]['resolutions'][0]['value']
                 else:
                     errorMsg = bibot.SLOT_CONFIG[key].get('error', 'Sorry, I don\'t understand "{}".')
-                    raise bibot.SlotError(errorMsg.format(slots.get(key)))
-                
+                    raise bibot.SlotError(errorMsg.format(slots.get(key)))  # this function has been implemented yet
+
+            # before return, adjust slot values as necessary after reading from intent slots
             slot_values[key] = userexits.post_process_slot_value(key, slot_values[key])
-    
+
     return slot_values
 
 
@@ -107,27 +116,28 @@ def get_remembered_slot_values(slot_values, session_attributes):
 
     str = session_attributes.get('rememberedSlots')
     remembered_slot_values = json.loads(str) if str is not None else {key: None for key in bibot.SLOT_CONFIG}
-    
+
     if slot_values is None:
         slot_values = {key: None for key in bibot.SLOT_CONFIG}
-    
+
     logger.debug('<<BIBot>> get_remembered_slot_values() - slot_values: %s', slot_values)
     logger.debug('<<BIBot>> get_remembered_slot_values() - remembered_slot_values: %s', remembered_slot_values)
-    for key,config in bibot.SLOT_CONFIG.items():
+    for key, config in bibot.SLOT_CONFIG.items():
         if config.get('remember', False):
             logger.debug('<<BIBot>> get_remembered_slot_values() - slot_values[%s] = %s', key, slot_values.get(key))
-            logger.debug('<<BIBot>> get_remembered_slot_values() - remembered_slot_values[%s] = %s', key, remembered_slot_values.get(key))
+            logger.debug('<<BIBot>> get_remembered_slot_values() - remembered_slot_values[%s] = %s', key,
+                         remembered_slot_values.get(key))
             if slot_values.get(key) is None:
                 slot_values[key] = remembered_slot_values.get(key)
-                
+
     return slot_values
 
 
 def remember_slot_values(slot_values, session_attributes):
     if slot_values is None:
-        slot_values = {key: None for key,config in bibot.SLOT_CONFIG.items() if config['remember']}
+        slot_values = {key: None for key, config in bibot.SLOT_CONFIG.items() if config['remember']}
     session_attributes['rememberedSlots'] = json.dumps(slot_values)
-    logger.debug('<<BIBot>> Storing updated slot values: %s', slot_values)           
+    logger.debug('<<BIBot>> Storing updated slot values: %s', slot_values)
     return slot_values
 
 
@@ -140,8 +150,8 @@ def close(session_attributes, fulfillment_state, message):
             'message': message
         }
     }
-    
-    logger.debug('<<BIBot>> "Lambda fulfillment function response = \n' + pprint.pformat(response, indent=4)) 
+
+    logger.debug('<<BIBot>> "Lambda fulfillment function response = \n' + pprint.pformat(response, indent=4))
 
     return response
 
@@ -151,7 +161,7 @@ def increment_counter(session_attributes, counter):
 
     if counter_value: count = int(counter_value) + 1
     else: count = 1
-    
+
     session_attributes[counter] = count
 
     return count
